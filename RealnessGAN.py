@@ -9,11 +9,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import skewnorm
 
+# Generator Settings
+G_LOSS_MODE = "EQ19_V2" 
+            # "None"      +KL(A1 || D(G(z)))                        Non-Relativistic - Equivalent to non-saturating EQ 18
+            # "EQ19_V1"   +KL(A1 || D(G(z))) + KL(D(x) || D(G(z)))  Relativistic
+            # "EQ19_V2"   -KL(A0 || D(G(z))) + KL(D(x) || D(G(z)))  Relativistic  <- this is the one from the paper
+            # "EQ20"      +KL(A1 || D(G(z))) - KL(A0 || D(G(z)))    Relativistic  <- this is the one from the paper
+
 # Global Settings
+SAVE_FOLDER = "resultsRealnessGAN"
 NUM_EPOCHS = 40
 BATCH_SIZE = 64
-D_LR = 1e-3
-G_LR = 1e-3
+D_LR = 2e-4
+G_LR = 2e-4
 BETA_1 = 0.5
 BETA_2 = 0.999
 
@@ -142,7 +150,7 @@ def train():
     def KLD(P, Q):
         return torch.mean(torch.sum(P * (P/Q).log(), dim=1))
 
-    # Print KLD between the anchords
+    # Print KLD between the anchors
     print("KLD(A0||A1): {}".format(KLD(A0.view(1, -1), A1)))
 
     # Global Loss Logger
@@ -178,14 +186,26 @@ def train():
             d_loss.backward()
             d_optim.step()
 
-            # Generator Loss
+            # Generator Forward Prop
             g_optim.zero_grad()
             z = generate_latent(batch_size, LATENT_DIM)
             g_images = g(z)
             d_g_out = d(g_images)
-            g_loss = KLD(A1, d_g_out)
 
-            # Generator Backprop and Gradient Descent
+            # Generator Loss
+            # Please refer to Line 12 
+            if (G_LOSS_MODE == "None"):
+                g_loss = KLD(A1, d_g_out)                           # +KL(A1 || D(G(z)))
+            elif (G_LOSS_MODE == "EQ19_V1"):
+                d_out = d(real_images)
+                g_loss = KLD(A1, d_g_out) + KLD(d_out, d_g_out)     # +KL(A1 || D(G(z))) + KL(D(x) || D(G(z)))
+            elif (G_LOSS_MODE == "EQ19_V2"):
+                d_out = d(real_images)
+                g_loss = -KLD(A0, d_g_out) + KLD(d_out, d_g_out)    # -KL(A0 || D(G(z))) + KL(D(x) || D(G(z)))
+            elif (G_LOSS_MODE == "EQ20"):
+                g_loss = KLD(A1, d_g_out) - KLD(A0, d_g_out)        # +KL(A1 || D(G(z))) - KL(A0 || D(G(z)))
+
+            # Total Generator Loss, Backprop and Gradient Descent
             g_loss.backward()
             g_optim.step()
 
@@ -206,6 +226,6 @@ def train():
             concat_tensor = torchvision.utils.make_grid(sample_tensor)
             sample_images = concat_tensor.clone().detach().cpu().numpy()
             sample_images = scale_back(sample_images).clip(0,1)
-            saveimg(sample_images, "resultsRealnessGAN/recon"+str(epoch)+".png")
+            saveimg(sample_images, SAVE_FOLDER + "/recon"+str(epoch)+".png")
 
 train()
